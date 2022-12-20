@@ -1,0 +1,203 @@
+﻿@page "/"
+@using BlazorApp1.DataStructure
+@using BlazorApp1.Services
+@using Blazorise
+@inject QuestionObjService QuestionObjService;
+@inject ResultsObjService ResultsObjService;
+
+<PageTitle>Index</PageTitle>
+
+<Card Width="Width.Is50" Margin="Margin.Is(margin)" Background="Background.Light">
+    <CardBody Padding="Padding.Is1">
+        <h3>Рекомендації по відпустці</h3>
+        <Check TValue="bool" Checked="@showRace" CheckedChanged="@onShowRace">Показати змагання</Check>
+    </CardBody>
+</Card>
+@if (showRace)
+{
+    <Row>
+        <Column ColumnSize="ColumnSize.Is6">
+            @foreach (var question in QuestionWithAnswers)
+            {
+                <QuestionCard Question="@GetQuestion(question.QuestionId)" OnAnswerSelected="OnAnswered" />
+            }
+        </Column>
+        <Column ColumnSize="ColumnSize.Is6">
+            <Alert Visible><h3>Змагання</h3></Alert>
+            @foreach (var racee in ResultsRace.OrderByDescending(x => x.Value))
+            {
+                <Card Width="Width.Is100" Margin="Margin.Is(margin)" Background="isValidResult(racee.Key) ? Background.Success : Background.Warning">
+                    <CardBody Padding="Padding.Is1">
+                        @racee.Value | @(GetResult(racee.Key).DisplayValue)
+                    </CardBody>
+                </Card>
+            }
+        </Column>
+    </Row>
+}
+else
+{
+    <Row>
+        <Column ColumnSize="ColumnSize.Is6">
+            @foreach (var question in QuestionWithAnswers)
+            {
+                <QuestionCard Question="@GetQuestion(question.QuestionId)" OnAnswerSelected="OnAnswered" />
+            }
+        </Column>
+    </Row>
+}
+
+@if (FirstBest != null)
+{
+    <Card Width="Width.Is50" Margin="Margin.Is(margin)" Background="Background.Success">
+        <CardBody Padding="Padding.Is1">
+            <h3>Найкращий варіант для вас:</h3>
+            <p>
+                <h3>
+                    @FirstBest.DisplayValue
+                </h3>
+            </p>
+            @if (showSecondBest)
+            {
+                <p>
+                    також можете розглянути варіант:
+                </p>
+                <p>
+                    <b>@SecondBest.DisplayValue</b>
+                </p>
+            }
+        </CardBody>
+    </Card>
+}
+
+@code {
+    private const string margin = "mx-auto my-2";
+
+    private bool showRace = false;
+
+    private List<QuestionObjWithAnswer> QuestionWithAnswers { get; set; } = new List<QuestionObjWithAnswer>();
+
+    private List<QuestionObj> AllQuestions = new List<QuestionObj>();
+    private List<ResultObj> AllResults = new List<ResultObj>();
+    private Dictionary<int, int> ResultsRace = new Dictionary<int, int>();
+
+    private List<Features> Features = new List<Features>();
+
+    private ResultObj FirstBest = null;
+    private ResultObj SecondBest = null;
+    private bool showSecondBest = false;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+
+        AllQuestions = new List<QuestionObj>(QuestionObjService.AllQuestions);
+        AllResults = new List<ResultObj>(ResultsObjService.AllResults);
+
+        foreach (var res in AllResults)
+        {
+            ResultsRace.Add(res.Id, 0);
+        }
+
+        QuestionWithAnswers.Add(new QuestionObjWithAnswer { QuestionId = AllQuestions.First().Id });
+    }
+
+    private QuestionObj GetQuestion(int questionId)
+    {
+        return AllQuestions.First(x => x.Id == questionId);
+    }
+
+    private ResultObj GetResult(int id)
+    {
+        return AllResults.First(x => x.Id == id);
+    }
+
+    private bool isValidResult(int id)
+    {
+        var result = AllResults.First(x => x.Id == id);
+        if (result.RequiredFeatures.Any() && result.RequiredFeatures.All(x => Features.Contains(x)) == false)
+        {
+            return false;
+        }
+
+        if (result.RulesOutFeatures.Any() && result.RulesOutFeatures.Any(x => Features.Contains(x)))
+        {
+            return false;
+        }
+        return true; 
+    }
+
+    private async Task OnAnswered(QuestionObjWithAnswer value)
+    {
+        var q = AllQuestions.First(x => x.Id == value.QuestionId);
+        var featuredResult = q.GetFeatureResult(value.Answer);
+
+        Features.Add(featuredResult);
+
+        var answeredQIds = QuestionWithAnswers.Select(x => x.QuestionId).ToList();
+
+        QuestionObj? nextQ = null;
+
+        foreach (var newQ in AllQuestions.Where(x => answeredQIds.Contains(x.Id) == false))
+        {
+            if (!newQ.RequiredFeatures.Any())
+            {
+                nextQ = newQ;
+                break;
+            }
+            if (newQ.RequiredFeatures.Intersect(Features).Any())
+            {
+                nextQ = newQ;
+                break;
+            }
+        }
+
+        // calculate results
+        foreach (var res in AllResults)
+        {
+            ResultsRace[res.Id] += res.FeaturesScore.ContainsKey(featuredResult) ? res.FeaturesScore[featuredResult] : 0;
+        }
+
+        if (nextQ == null)
+        {
+            // no more questions, show result
+            // rule out results and check if requirements met
+            foreach (var possRes in ResultsRace.OrderByDescending(x => x.Value))
+            {
+                var result = AllResults.First(x => x.Id == possRes.Key);
+
+                if (result.RequiredFeatures.Any() && result.RequiredFeatures.All(x => Features.Contains(x)) == false)
+                {
+                    continue;
+                }
+
+                if (result.RulesOutFeatures.Any() && result.RulesOutFeatures.Any(x => Features.Contains(x)))
+                {
+                    continue;
+                }
+
+                if (FirstBest == null)
+                {
+                    FirstBest = result;
+                    continue;
+                }
+
+                if (SecondBest == null)
+                {
+                    SecondBest = result;
+                    showSecondBest = ResultsRace[FirstBest.Id] - possRes.Value <= 10;
+                    break;
+                }
+            }
+
+            return;
+        }
+
+        QuestionWithAnswers.Add(new QuestionObjWithAnswer { QuestionId = nextQ.Id });
+    }
+
+    void onShowRace(bool value)
+    {
+        showRace = value;
+    }
+}

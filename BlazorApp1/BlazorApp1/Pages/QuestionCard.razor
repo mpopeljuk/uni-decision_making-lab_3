@@ -1,0 +1,29 @@
+﻿@using BlazorApp1.DataStructure
+@using Blazorise
+
+
+<Card Width="Width.Is100" Margin="Margin.Is(margin)" Background="Background.Info">
+    <CardBody Padding="Padding.Is1">
+        <h3>@Question.DisplayValue</h3>
+        <input @bind="Answer"/>
+        <button @onclick="AcceptAnswer">Далі</button>
+    </CardBody>
+</Card>
+
+@code {
+    private const string margin = "mx-auto my-2";
+
+    [Parameter]
+    public QuestionObj Question { get; set; }
+
+    public string Answer { get; set; }
+
+    [Parameter]
+    public EventCallback<QuestionObjWithAnswer> OnAnswerSelected { get; set; }
+
+    private async Task AcceptAnswer()
+    {
+        await OnAnswerSelected.InvokeAsync(new QuestionObjWithAnswer { QuestionId = Question.Id, Answer = Answer });
+    }
+
+}
